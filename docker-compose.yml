@@ -1,0 +1,40 @@
+services:
+  db:
+    image: postgres:13
+    container_name: chapter-track-updater-db
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${DB_NAME:-manga-to-read}
+    ports:
+      - "5432:5432"
+    volumes:
+      - chapter-track-updater-db:/var/lib/postgresql/data
+    networks:
+      - chapter-track-updater-network
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: chapter-track-updater-app
+    environment:
+      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@db:5432/${DB_NAME:-manga-to-read}?schema=public
+      SCRAPING_SERVICE_URL: ${SCRAPING_SERVICE_URL}
+      PORT: ${PORT}
+      CRON_SCHEDULE: ${CRON_SCHEDULE}
+      NOTIFY_CRON_SCHEDULE: ${NOTIFY_CRON_SCHEDULE}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+    depends_on:
+      - db
+    ports:
+      - "3001:3001"
+    networks:
+      - chapter-track-updater-network
+    command: bash -c "npx prisma migrate deploy && npm start"
+
+volumes:
+  chapter-track-updater-db:
+
+networks:
+  chapter-track-updater-network:
