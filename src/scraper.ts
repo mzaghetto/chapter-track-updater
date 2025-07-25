@@ -2,7 +2,7 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { getCloudflareBypassed } from './lib/proxy';
 
-async function fetchHtml(url: string, useProxy: boolean): Promise<string> {
+export async function fetchHtml(url: string, useProxy: boolean): Promise<string> {
   if (useProxy) {
     const { data } = await getCloudflareBypassed(url);
     return data;
