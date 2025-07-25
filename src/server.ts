@@ -81,6 +81,42 @@ app.post('/trigger-notifications', async (req, res) => {
   }
 });
 
+app.post('/create-manhwa-from-url', async (req, res) => {
+  const { url, useProxy } = req.body;
+
+  if (!url) {
+    return res.status(400).json({ message: 'URL is required' });
+  }
+
+  try {
+    const htmlContent = await fetchHtml(url, useProxy || false);
+    const manhwaDetails = await aiService.extractManhwaDetails(htmlContent);
+
+    if (!manhwaDetails || !manhwaDetails.name) {
+      return res.status(400).json({ message: 'Could not extract manhwa details from URL' });
+    }
+
+    // Handle author as a single string
+    const authorString = Array.isArray(manhwaDetails.author) ? manhwaDetails.author.join(', ') : manhwaDetails.author;
+
+    const newManhwa = await prisma.manhwas.create({
+      data: {
+        name: manhwaDetails.name,
+        author: authorString,
+        genre: manhwaDetails.genre,
+        coverImage: manhwaDetails.coverImage,
+        description: manhwaDetails.description,
+        status: manhwaDetails.status,
+      },
+    });
+
+    res.json({ message: 'Manhwa created successfully', manhwa: newManhwa });
+  } catch (error: any) {
+    console.error('Error creating manhwa from URL:', error);
+    res.status(500).json({ message: 'Error creating manhwa from URL', error: error.message });
+  }
+});
+
 app.post('/trigger-health-check', async (req, res) => {
   try {
     await healthCheckJob();
