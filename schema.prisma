@@ -1,0 +1,140 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Users {
+  id                   BigInt              @id @default(autoincrement())
+  name                 String
+  username             String              @unique
+  email                String              @unique
+  password_hash        String
+  googleId             String?
+  role                 Role                @default(USER)
+  preferences          Json?
+  lastLogin            DateTime?
+  resetPasswordToken   String?
+  resetPasswordExpires DateTime?
+  telegramId           String?
+  telegramActive       Boolean             @default(false)
+  telegramLinkingToken String?             @unique
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+  userManhwas          UserManhwa[]
+  userNotifications    UserNotifications[]
+
+  @@index([username])
+  @@index([email])
+  @@index([preferences])
+}
+
+model Manhwas {
+  id                BigInt              @id @default(autoincrement())
+  name              String
+  author            String?
+  genre             Json?
+  coverImage        String?
+  description       String?
+  status            ManhwaStatus?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  userManhwas       UserManhwa[]
+  manhwaProviders   ManhwaProvider[]
+  userNotifications UserNotifications[]
+
+  @@index([genre])
+}
+
+model Providers {
+  id              BigInt           @id @default(autoincrement())
+  name            String
+  url             String?
+  isActive        Boolean          @default(true)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  manhwaProviders ManhwaProvider[]
+  userManhwas     UserManhwa[]
+}
+
+model ManhwaProvider {
+  id                  BigInt    @id @default(autoincrement())
+  manhwaId            BigInt
+  providerId          BigInt
+  lastEpisodeReleased Float?
+  url                 String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  manhwa              Manhwas   @relation(fields: [manhwaId], references: [id], onDelete: Cascade)
+  provider            Providers @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@index([manhwaId])
+  @@index([providerId])
+}
+
+model UserManhwa {
+  id                  BigInt           @id @default(autoincrement())
+  userId              BigInt
+  manhwaId            BigInt
+  providerId          BigInt?
+  status              UserManhwaStatus
+  lastEpisodeRead     Float?
+  lastNotifiedEpisode Float?
+  order               Int
+  lastUpdated         DateTime?
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+  user                Users            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  manhwa              Manhwas          @relation(fields: [manhwaId], references: [id], onDelete: Cascade)
+  provider            Providers?       @relation(fields: [providerId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([manhwaId])
+  @@index([providerId])
+}
+
+model UserNotifications {
+  id        BigInt              @id @default(autoincrement())
+  userId    BigInt
+  manhwaId  BigInt
+  channel   NotificationChannel
+  isEnabled Boolean             @default(true)
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+  user      Users               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  manhwa    Manhwas             @relation(fields: [manhwaId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([manhwaId])
+}
+
+enum Role {
+  ADMIN
+  USER
+}
+
+enum ManhwaStatus {
+  ONGOING
+  COMPLETED
+  HIATUS
+}
+
+enum UserManhwaStatus {
+  READING
+  PAUSED
+  DROPPED
+  COMPLETED
+}
+
+enum NotificationChannel {
+  TELEGRAM
+  WEBSITE
+  EMAIL
+  PUSH
+}
