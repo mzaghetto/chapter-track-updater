@@ -32,7 +32,7 @@ services:
     depends_on:
       - db
     ports:
-      - "30001:30001"
+      - "${PORT}:${PORT}"
     networks:
       - chapter-track-updater-network
     command: bash -c "npx prisma db push && npm start"
