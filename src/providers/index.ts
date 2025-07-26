@@ -9,7 +9,7 @@ export const providers: Provider[] = [
   },
   {
     name: 'mgeko',
-    url: 'https://neoxscans.net',
+    url: 'https://www.mgeko.cc',
     selector: '.chapter-list li:first-child',
     useProxy: false,
   },
