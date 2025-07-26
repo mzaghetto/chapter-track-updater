@@ -35,7 +35,7 @@ services:
       - "3001:3001"
     networks:
       - chapter-track-updater-network
-    command: bash -c "npx prisma migrate deploy && npm start"
+    command: bash -c "npx prisma migrate dev --name init && npm start"
 
 volumes:
   chapter-track-updater-db:
