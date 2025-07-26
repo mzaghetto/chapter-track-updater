@@ -1,5 +1,7 @@
 require('dotenv').config();
 
+import './cron';
+
 import express from 'express';
 import { prisma } from './lib/prisma';
 import { scrape, fetchHtml } from './scraper';
