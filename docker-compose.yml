@@ -19,7 +19,7 @@ services:
       dockerfile: Dockerfile
     container_name: chapter-track-updater-app
     environment:
-      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@db:5432/${DB_NAME:-manga-to-read}?schema=public
+      DATABASE_URL: ${DATABASE_URL}
       SCRAPING_SERVICE_URL: ${SCRAPING_SERVICE_URL}
       PORT: ${PORT}
       CRON_SCHEDULE: ${CRON_SCHEDULE}
