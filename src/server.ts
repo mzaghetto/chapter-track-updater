@@ -132,6 +132,171 @@ app.get('/health', (req, res) => {
   res.status(200).send('OK');
 });
 
+app.post('/create-manhwa-complete', async (req, res) => {
+  const { contentUrl, providerUrl, providerName, providerSelector, useProxy } = req.body;
+
+  if (!contentUrl || !providerUrl || !providerName) {
+    return res.status(400).json({ 
+      message: 'contentUrl, providerUrl and providerName are required' 
+    });
+  }
+
+  try {
+    const htmlContent = await fetchHtml(contentUrl, Boolean(useProxy));
+    const manhwaDetails = await aiService.extractManhwaDetails(htmlContent);
+    
+    if (!manhwaDetails?.name) {
+      throw new Error('Could not extract manhwa details from URL');
+    }
+
+    console.log(manhwaDetails);
+
+    const authorString = Array.isArray(manhwaDetails.author) 
+      ? manhwaDetails.author.join(', ') 
+      : manhwaDetails.author;
+
+    let newManhwa = await prisma.manhwas.findFirst({
+      where: {
+        name: manhwaDetails.name,
+        author: authorString
+      }
+    });
+
+    if (!newManhwa) {
+      newManhwa = await prisma.manhwas.create({
+      data: {
+        name: manhwaDetails.name,
+        author: authorString,
+        genre: manhwaDetails.genre,
+        coverImage: manhwaDetails.coverImage,
+        description: manhwaDetails.description,
+        status: manhwaDetails.status,
+      },
+      });
+    }
+
+    let provider = await prisma.providers.findFirst({
+      where: { name: providerName }
+    });
+
+    if (!provider) {
+      provider = await prisma.providers.create({
+        data: { name: providerName }
+      });
+    }
+
+    let lastChapter = null;
+    try {
+      lastChapter = await scrape(
+        providerUrl, 
+        providerSelector || '',
+        Boolean(useProxy)
+      );
+    } catch (error) {
+      console.error('Failed to scrape initial chapter:', error);
+      lastChapter = 0;
+    }
+
+    await prisma.manhwaProvider.create({
+      data: {
+        manhwaId: newManhwa.id,
+        providerId: provider.id,
+        url: providerUrl,
+        lastEpisodeReleased: lastChapter,
+      }
+    });
+
+    res.json({
+      success: true,
+      manhwa: newManhwa,
+      lastChapter,
+      provider: {
+        id: provider.id,
+        name: provider.name
+      }
+    });
+
+  } catch (error: any) {
+    console.error('Error in create-manhwa-complete:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to create manhwa',
+      error: error.message
+    });
+  }
+});
+
+app.post('/set-manhwa-to-provider', async (req, res) => {
+  const { manhwaName, providerUrl, providerName, providerSelector, useProxy } = req.body;
+
+  if (!manhwaName || !providerUrl || !providerName) {
+    return res.status(400).json({ 
+      message: 'manhwaName, providerUrl and providerName are required' 
+    });
+  }
+
+  try {
+    let manhwa = await prisma.manhwas.findFirst({
+      where: {
+        name: manhwaName,
+      }
+    });
+
+    if (!manhwa) {
+      return res.status(404).json({ message: 'Manhwa not found' });
+    }
+
+    let provider = await prisma.providers.findFirst({
+      where: { name: providerName }
+    });
+
+    if (!provider) {
+      provider = await prisma.providers.create({
+        data: { name: providerName }
+      });
+    }
+
+    let lastChapter = null;
+    try {
+      lastChapter = await scrape(
+        providerUrl, 
+        providerSelector || '', 
+        Boolean(useProxy)
+      );
+    } catch (error) {
+      console.error('Failed to scrape initial chapter:', error);
+      lastChapter = 0;
+    }
+
+    await prisma.manhwaProvider.create({
+      data: {
+        manhwaId: manhwa.id,
+        providerId: provider.id,
+        url: providerUrl,
+        lastEpisodeReleased: lastChapter,
+      }
+    });
+
+    res.json({
+      success: true,
+      manhwa: manhwa,
+      lastChapter,
+      provider: {
+        id: provider.id,
+        name: provider.name
+      }
+    });
+
+  } catch (error: any) {
+    console.error('Error in set-manhwa-to-provider:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to create manhwa to provider',
+      error: error.message
+    });
+  }
+});
+
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);

@@ -4,3 +4,11 @@ export interface Provider {
   selector: string;
   useProxy: boolean;
 }
+
+export interface CreateManhwaFromUrlRequest {
+  contentUrl: string;
+  providerUrl: string;
+  providerName: string;
+  providerSelector?: string;
+  useProxy?: boolean;
+}
