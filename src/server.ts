@@ -8,6 +8,7 @@ import { scrape, fetchHtml } from './scraper';
 import { updateChaptersJob } from './jobs/updateChapters';
 import { notifyUsersJob } from './jobs/notifyUsers';
 import { healthCheckJob } from './jobs/healthCheck';
+import { updateCoverImagesJob } from './jobs/updateCoverImages';
 import { AIService } from './services/aiService';
 
 const app = express();
@@ -116,6 +117,21 @@ app.post('/create-manhwa-from-url', async (req, res) => {
   } catch (error: any) {
     console.error('Error creating manhwa from URL:', error);
     res.status(500).json({ message: 'Error creating manhwa from URL', error: error.message });
+  }
+});
+
+app.post('/update-cover-images', async (req, res) => {
+  const { providerName, imageSelector, useProxy, manhwaNames } = req.body;
+
+  if (!providerName) {
+    return res.status(400).json({ message: 'providerName is required' });
+  }
+
+  try {
+    const results = await updateCoverImagesJob(providerName, imageSelector, useProxy, manhwaNames);
+    res.json({ message: 'Cover image update job completed', results });
+  } catch (error: any) {
+    res.status(500).json({ message: 'Error updating cover images', error: error.message });
   }
 });
 
