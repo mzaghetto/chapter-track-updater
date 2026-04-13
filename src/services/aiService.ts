@@ -47,8 +47,26 @@ export class AIService {
         },
       );
 
-      const rawResponse = response.data.choices[0].message.content;
-      return JSON.parse(rawResponse) as ManhwaDetails;
+      const rawResponse: string = response.data.choices[0].message.content ?? '';
+      const cleaned = rawResponse.replace(/^\s*```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
+      const firstBrace = cleaned.indexOf('{');
+      const lastBrace = cleaned.lastIndexOf('}');
+      const jsonSlice = firstBrace !== -1 && lastBrace > firstBrace ? cleaned.slice(firstBrace, lastBrace + 1) : cleaned;
+
+      let parsed: ManhwaDetails;
+      try {
+        parsed = JSON.parse(jsonSlice) as ManhwaDetails;
+      } catch (parseError) {
+        console.error('AI returned invalid JSON. Raw response:', rawResponse);
+        throw parseError;
+      }
+
+      const normalizedStatus = typeof parsed.status === 'string' ? parsed.status.toUpperCase() : null;
+      parsed.status = normalizedStatus === 'ONGOING' || normalizedStatus === 'COMPLETED' || normalizedStatus === 'HIATUS'
+        ? normalizedStatus
+        : null;
+
+      return parsed;
     } catch (error) {
       console.error('Error extracting manhwa details with AI:', error);
       return null;
