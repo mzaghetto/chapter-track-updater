@@ -28,7 +28,7 @@ export class AIService {
     this.openRouterModelName = modelName;
   }
 
-  async extractManhwaDetails(content: string): Promise<ManhwaDetails | null> {
+  async extractManhwaDetails(content: string): Promise<ManhwaDetails> {
     const prompt = `Given the following HTML content from a manhwa website, extract the following details in JSON format:\n- name: The title of the manhwa.\n- author: The author of the manhwa (if available, otherwise null).\n- genre: An array of strings representing the genres.\n- coverImage: The URL of the cover image (if available, otherwise null).\n- description: A brief description or synopsis of the manhwa (if available, otherwise null).\n- status: The current status of the manhwa (e.g., 'ONGOING', 'COMPLETED', 'HIATUS', otherwise null).\n\nEnsure the output is a valid JSON object. If a field is not found, use null or an empty array for genre.\n\nHTML Content:\n\`\`\`html\n${content}\n\`\`\`\n\nJSON Output:`;
 
     try {
@@ -47,7 +47,20 @@ export class AIService {
         },
       );
 
-      const rawResponse: string = response.data.choices[0].message.content ?? '';
+      // OpenRouter answers 200 with an `error` payload (and no choices) on rate limits
+      // and upstream provider failures — don't let that become a cryptic TypeError.
+      const choice = response.data?.choices?.[0];
+
+      if (!choice) {
+        const apiError = response.data?.error;
+        throw new Error(
+          apiError?.message
+            ? `the model "${this.openRouterModelName}" returned no completion: ${apiError.message}`
+            : `the model "${this.openRouterModelName}" returned no completion: ${JSON.stringify(response.data).slice(0, 300)}`,
+        );
+      }
+
+      const rawResponse: string = choice.message?.content ?? '';
       const cleaned = rawResponse.replace(/^\s*```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
       const firstBrace = cleaned.indexOf('{');
       const lastBrace = cleaned.lastIndexOf('}');
@@ -58,7 +71,9 @@ export class AIService {
         parsed = JSON.parse(jsonSlice) as ManhwaDetails;
       } catch (parseError) {
         console.error('AI returned invalid JSON. Raw response:', rawResponse);
-        throw parseError;
+        throw new Error(
+          `the model returned invalid JSON: ${rawResponse.slice(0, 200)}`,
+        );
       }
 
       const normalizedStatus = typeof parsed.status === 'string' ? parsed.status.toUpperCase() : null;
@@ -69,7 +84,18 @@ export class AIService {
       return parsed;
     } catch (error) {
       console.error('Error extracting manhwa details with AI:', error);
-      return null;
+
+      // Surface *why* it failed — the admin UI shows this message.
+      if (axios.isAxiosError(error)) {
+        const status = error.response?.status ?? 'no status';
+        const detail =
+          (error.response?.data as any)?.error?.message ??
+          error.response?.statusText ??
+          error.message;
+        throw new Error(`OpenRouter request failed (${status}): ${detail}`);
+      }
+
+      throw error instanceof Error ? error : new Error(String(error));
     }
   }
 }

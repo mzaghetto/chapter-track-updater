@@ -4,12 +4,16 @@ import './cron';
 
 import express from 'express';
 import { prisma } from './lib/prisma';
-import { scrape, fetchHtml } from './scraper';
+import { scrape } from './scraper';
 import { updateChaptersJob } from './jobs/updateChapters';
 import { notifyUsersJob } from './jobs/notifyUsers';
 import { healthCheckJob } from './jobs/healthCheck';
 import { updateCoverImagesJob } from './jobs/updateCoverImages';
-import { AIService } from './services/aiService';
+import {
+  ExtractionError,
+  extractManhwaPreview,
+  listProviderConfigs,
+} from './services/extractionService';
 
 const app = express();
 app.use(express.json());
@@ -19,7 +23,13 @@ app.use(express.json());
   return this.toString();
 };
 
-const aiService = new AIService();
+function sendExtractionError(res: any, error: any, fallbackMessage: string) {
+  if (error instanceof ExtractionError) {
+    return res.status(error.statusCode).json({ message: error.message });
+  }
+  console.error(fallbackMessage, error);
+  return res.status(500).json({ message: fallbackMessage, error: error.message });
+}
 
 app.post('/test-scrape', async (req, res) => {
   const { providerName, useProxy, selector } = req.body;
@@ -84,6 +94,37 @@ app.post('/trigger-notifications', async (req, res) => {
   }
 });
 
+/**
+ * Read-only extraction: fetches the page, runs the AI and (when possible) scrapes the
+ * latest chapter. Nothing is written to the database — this is what the admin panel
+ * calls through the main API before showing the data for review.
+ */
+app.post('/extract/preview', async (req, res) => {
+  const { contentUrl, providerUrl, providerName, selector, useProxy } = req.body;
+
+  if (!contentUrl) {
+    return res.status(400).json({ message: 'contentUrl is required' });
+  }
+
+  try {
+    const preview = await extractManhwaPreview({
+      contentUrl,
+      providerUrl,
+      providerName,
+      selector,
+      useProxy,
+    });
+
+    res.json(preview);
+  } catch (error: any) {
+    sendExtractionError(res, error, 'Error extracting manhwa preview');
+  }
+});
+
+app.get('/providers-config', (_req, res) => {
+  res.json({ configs: listProviderConfigs() });
+});
+
 app.post('/create-manhwa-from-url', async (req, res) => {
   const { url, useProxy } = req.body;
 
@@ -92,31 +133,25 @@ app.post('/create-manhwa-from-url', async (req, res) => {
   }
 
   try {
-    const htmlContent = await fetchHtml(url, useProxy || false);
-    const manhwaDetails = await aiService.extractManhwaDetails(htmlContent);
-
-    if (!manhwaDetails || !manhwaDetails.name) {
-      return res.status(400).json({ message: 'Could not extract manhwa details from URL' });
-    }
-
-    // Handle author as a single string
-    const authorString = Array.isArray(manhwaDetails.author) ? manhwaDetails.author.join(', ') : manhwaDetails.author;
+    const { manhwa: details } = await extractManhwaPreview({
+      contentUrl: url,
+      useProxy,
+    });
 
     const newManhwa = await prisma.manhwas.create({
       data: {
-        name: manhwaDetails.name,
-        author: authorString,
-        genre: manhwaDetails.genre,
-        coverImage: manhwaDetails.coverImage,
-        description: manhwaDetails.description,
-        status: manhwaDetails.status,
+        name: details.name,
+        author: details.author,
+        genre: details.genre,
+        coverImage: details.coverImage,
+        description: details.description,
+        status: details.status,
       },
     });
 
     res.json({ message: 'Manhwa created successfully', manhwa: newManhwa });
   } catch (error: any) {
-    console.error('Error creating manhwa from URL:', error);
-    res.status(500).json({ message: 'Error creating manhwa from URL', error: error.message });
+    sendExtractionError(res, error, 'Error creating manhwa from URL');
   }
 });
 
@@ -158,35 +193,30 @@ app.post('/create-manhwa-complete', async (req, res) => {
   }
 
   try {
-    const htmlContent = await fetchHtml(contentUrl, Boolean(useProxy));
-    const manhwaDetails = await aiService.extractManhwaDetails(htmlContent);
-    
-    if (!manhwaDetails?.name) {
-      throw new Error('Could not extract manhwa details from URL');
-    }
-
-    console.log(manhwaDetails);
-
-    const authorString = Array.isArray(manhwaDetails.author) 
-      ? manhwaDetails.author.join(', ') 
-      : manhwaDetails.author;
+    const { manhwa: details, lastChapter } = await extractManhwaPreview({
+      contentUrl,
+      providerUrl,
+      providerName,
+      selector: providerSelector,
+      useProxy,
+    });
 
     let newManhwa = await prisma.manhwas.findFirst({
       where: {
-        name: manhwaDetails.name,
-        author: authorString
+        name: details.name,
+        author: details.author
       }
     });
 
     if (!newManhwa) {
       newManhwa = await prisma.manhwas.create({
       data: {
-        name: manhwaDetails.name,
-        author: authorString,
-        genre: manhwaDetails.genre,
-        coverImage: manhwaDetails.coverImage,
-        description: manhwaDetails.description,
-        status: manhwaDetails.status,
+        name: details.name,
+        author: details.author,
+        genre: details.genre,
+        coverImage: details.coverImage,
+        description: details.description,
+        status: details.status,
       },
       });
     }
@@ -201,24 +231,12 @@ app.post('/create-manhwa-complete', async (req, res) => {
       });
     }
 
-    let lastChapter = null;
-    try {
-      lastChapter = await scrape(
-        providerUrl, 
-        providerSelector || '',
-        Boolean(useProxy)
-      );
-    } catch (error) {
-      console.error('Failed to scrape initial chapter:', error);
-      lastChapter = 0;
-    }
-
     await prisma.manhwaProvider.create({
       data: {
         manhwaId: newManhwa.id,
         providerId: provider.id,
         url: providerUrl,
-        lastEpisodeReleased: lastChapter,
+        lastEpisodeReleased: lastChapter ?? 0,
       }
     });
 
@@ -233,12 +251,7 @@ app.post('/create-manhwa-complete', async (req, res) => {
     });
 
   } catch (error: any) {
-    console.error('Error in create-manhwa-complete:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to create manhwa',
-      error: error.message
-    });
+    sendExtractionError(res, error, 'Failed to create manhwa');
   }
 });
 
